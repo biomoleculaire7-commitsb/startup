@@ -96,24 +96,32 @@ const BACKEND = import.meta.env.VITE_BACKEND_URL || '';
 
 // ── Claude API (called directly from browser) ──────────────────────────────
 async function callClaude(system, userMsg, stream = false, onChunk = null) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
-      stream,
-      system,
-      messages: [{ role: 'user', content: userMsg }],
-    }),
-  });
+  const body = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4000,
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+  };
 
   if (!stream) {
+    // Non-streaming — use backend proxy
+    const res = await fetch('/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     const d = await res.json();
     if (d.error) throw new Error(d.error.message || 'Claude API error');
     return (d.content || []).map(b => b.text || '').join('');
   }
 
+  // Streaming — use backend SSE proxy
+  const res = await fetch('/claude/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error('Stream error: ' + res.status);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let full = '';
@@ -252,7 +260,7 @@ export default function App() {
   const [script, setScript]         = useState('')
   const [showForm, setShowForm]     = useState(true)
 
-  const ready = idea.trim().length > 20 && university.trim() && incubator.trim()
+  const ready = idea.trim().length > 50 && university.trim() && incubator.trim()
   const updMember = (i, f, v) => setMembers(m => m.map((mem, idx) => idx === i ? { ...mem, [f]: v } : mem))
 
   const generate = async () => {
@@ -371,12 +379,12 @@ export default function App() {
                 value={idea}
                 onChange={e => setIdea(e.target.value)}
                 disabled={loading}
-                placeholder="مثال: تطبيق يربط طلبة الجزائر بأساتذة معتمدين للدروس الخصوصية عبر نظام حجز رقمي ودفع إلكتروني (CIB / BaridiMob)..."
+                placeholder="مثال: تطبيق يربط طلبة الجزائر بأساتذة معتمدين للدروس الخصوصية عبر نظام حجز رقمي ودفع إلكتروني... (اكتب على الأقل 2-3 جمل لتفاصيل أفضل)"
                 rows={3}
                 className="idea-input"
               />
-              <span className="char-count" style={{ color: idea.length > 20 ? '#C9A84C' : '#333348' }}>
-                {idea.length} حرف
+              <span className="char-count" style={{ color: idea.length > 50 ? '#C9A84C' : '#C06030' }}>
+                {idea.length} حرف • {Math.round(idea.trim().split(/\s+/).filter(Boolean).length)} كلمة {idea.trim().length < 50 ? `— أضف ${50 - idea.trim().length} حرف أو أكثر` : '✓ جاهز'}
               </span>
             </div>
 
