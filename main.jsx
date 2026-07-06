@@ -97,7 +97,6 @@ const BACKEND = import.meta.env.VITE_BACKEND_URL || '';
 // ── Claude API (called directly from browser) ──────────────────────────────
 async function callClaude(system, userMsg, stream = false, onChunk = null) {
   const body = {
-    model: 'claude-sonnet-4-6',
     max_tokens: 4000,
     system,
     messages: [{ role: 'user', content: userMsg }],
@@ -110,8 +109,13 @@ async function callClaude(system, userMsg, stream = false, onChunk = null) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => 'Unknown error');
+      throw new Error('API Error ' + res.status + ': ' + errText.slice(0, 200));
+    }
     const d = await res.json();
-    if (d.error) throw new Error(d.error.message || 'Claude API error');
+    if (d.error) throw new Error(typeof d.error === 'string' ? d.error : JSON.stringify(d.error));
+    if (!d.content || !d.content.length) throw new Error('Empty response from AI');
     return (d.content || []).map(b => b.text || '').join('');
   }
 
@@ -121,7 +125,10 @@ async function callClaude(system, userMsg, stream = false, onChunk = null) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error('Stream error: ' + res.status);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error('Stream Error ' + res.status + ': ' + errText.slice(0, 200));
+  }
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let full = '';
@@ -301,7 +308,7 @@ export default function App() {
       setScript(sc)
       setPhase('done')
     } catch (e) {
-      setError(e.message || 'خطأ غير متوقع')
+      setError(e.message || 'خطأ غير متوقع — تحقق من Render Logs')
       setPhase(null)
     }
     setLoading(false)
