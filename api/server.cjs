@@ -5,7 +5,7 @@ const { readFileSync, unlinkSync, existsSync } = require('fs');
 const { join, extname } = require('path');
 const { tmpdir } = require('os');
 
-// ── Generators ─────────────────────────────────────────────────────────────
+// ── Generators ──────────────────────────────────────────────────────────────
 const { generatePPTX } = require('./generate_pptx.cjs');
 const { generateDOCX }  = require('./generate_docx.cjs');
 console.log('✅ Generators loaded');
@@ -30,10 +30,9 @@ const MIME = {
   '.png':  'image/png',
   '.svg':  'image/svg+xml',
   '.ico':  'image/x-icon',
-  '.woff2':'font/woff2',
 };
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -64,38 +63,44 @@ function serveStatic(res, filePath) {
   }
 }
 
-// ── Gemini proxy helper ──────────────────────────────────────────────────────
-function proxyToGemini(body, stream) {
+// ── Gemini API call ──────────────────────────────────────────────────────────
+function callGemini(body, stream) {
   return new Promise((resolve, reject) => {
-    // Convert Anthropic format → Gemini format
-    const systemText = body.system || '';
-    const userText   = (body.messages || []).map(m => m.content).join('\n');
-    const combined   = systemText ? systemText + '\n\n' + userText : userText;
+    if (!API_KEY) {
+      reject(new Error('GEMINI_API_KEY not set in environment variables'));
+      return;
+    }
 
-    const geminiBody = {
+    const systemText = body.system || '';
+    const userText   = (body.messages || []).map(m =>
+      typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+    ).join('\n');
+    const combined = systemText ? systemText + '\n\n' + userText : userText;
+
+    const geminiBody = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: combined }] }],
       generationConfig: {
         maxOutputTokens: body.max_tokens || 4000,
         temperature: 0.7,
       },
-    };
+    });
 
-    const path = stream
+    const endpoint = stream
       ? `/v1beta/models/gemini-1.5-pro:streamGenerateContent?alt=sse&key=${API_KEY}`
       : `/v1beta/models/gemini-1.5-pro:generateContent?key=${API_KEY}`;
 
-    const payload = JSON.stringify(geminiBody);
     const req = https.request({
       hostname: 'generativelanguage.googleapis.com',
-      path,
-      method:  'POST',
+      path:     endpoint,
+      method:   'POST',
       headers: {
         'Content-Type':   'application/json',
-        'Content-Length': Buffer.byteLength(payload),
+        'Content-Length': Buffer.byteLength(geminiBody),
       },
     }, resolve);
+
     req.on('error', reject);
-    req.write(payload);
+    req.write(geminiBody);
     req.end();
   });
 }
@@ -103,51 +108,98 @@ function proxyToGemini(body, stream) {
 // ── Request handler ──────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
 
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, CORS); res.end(); return;
-  }
+  if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return; }
 
-  // Health check
+  // Health
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, prod: IS_PROD, hasKey: !!API_KEY, model: 'gemini-1.5-pro' }));
+    res.end(JSON.stringify({
+      ok: true, prod: IS_PROD,
+      hasKey: !!API_KEY,
+      model: 'gemini-1.5-pro'
+    }));
     return;
   }
 
-  // ── Gemini non-streaming proxy ───────────────────────────────────────────
+  // ── /claude — non-streaming ──────────────────────────────────────────────
   if (req.method === 'POST' && req.url === '/claude') {
     try {
       const body   = await readBody(req);
-      const apiRes = await proxyToGemini(body, false);
+      const apiRes = await callGemini(body, false);
+
       const chunks = [];
       apiRes.on('data', c => chunks.push(c));
       apiRes.on('end', () => {
+        const rawStr = Buffer.concat(chunks).toString();
+        const status = apiRes.statusCode;
+        console.log('[Gemini /claude] HTTP', status, '| preview:', rawStr.slice(0, 300));
+
+        // Non-200 response
+        if (status !== 200) {
+          let errMsg = 'Gemini HTTP ' + status;
+          try {
+            const j = JSON.parse(rawStr);
+            errMsg = j.error?.message || j.error || errMsg;
+          } catch {
+            errMsg += ': ' + rawStr.slice(0, 150);
+          }
+          res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: errMsg }));
+          return;
+        }
+
+        // Parse JSON response
         try {
-          const raw  = JSON.parse(Buffer.concat(chunks).toString());
-          const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          // Return in Anthropic-compatible format
+          const json = JSON.parse(rawStr);
+          if (json.error) {
+            res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Gemini: ' + (json.error.message || JSON.stringify(json.error)) }));
+            return;
+          }
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          if (!text) {
+            const reason = json.candidates?.[0]?.finishReason || JSON.stringify(json).slice(0, 200);
+            res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Empty response from Gemini. Reason: ' + reason }));
+            return;
+          }
           res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            content: [{ type: 'text', text }]
-          }));
+          res.end(JSON.stringify({ content: [{ type: 'text', text }] }));
         } catch (e) {
           res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Parse error: ' + e.message }));
+          res.end(JSON.stringify({ error: 'Response parse error: ' + e.message + ' | raw: ' + rawStr.slice(0, 150) }));
         }
       });
     } catch (e) {
+      console.error('[/claude error]', e.message);
       res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: e.message }));
     }
     return;
   }
 
-  // ── Gemini streaming proxy (SSE → Anthropic-compatible SSE) ────────────
+  // ── /claude/stream — streaming SSE ──────────────────────────────────────
   if (req.method === 'POST' && req.url === '/claude/stream') {
     try {
       const body   = await readBody(req);
-      const apiRes = await proxyToGemini(body, true);
+      const apiRes = await callGemini(body, true);
+
+      // Check status first
+      if (apiRes.statusCode !== 200) {
+        const chunks = [];
+        apiRes.on('data', c => chunks.push(c));
+        apiRes.on('end', () => {
+          const rawStr = Buffer.concat(chunks).toString();
+          let errMsg = 'Gemini Stream HTTP ' + apiRes.statusCode;
+          try {
+            const j = JSON.parse(rawStr);
+            errMsg = j.error?.message || errMsg;
+          } catch { errMsg += ': ' + rawStr.slice(0, 100); }
+          res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: errMsg }));
+        });
+        return;
+      }
 
       res.writeHead(200, {
         ...CORS,
@@ -160,8 +212,7 @@ const server = http.createServer(async (req, res) => {
       apiRes.on('data', chunk => {
         buffer += chunk.toString();
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep incomplete line
-
+        buffer = lines.pop();
         for (const line of lines) {
           if (!line.startsWith('data:')) continue;
           const raw = line.slice(5).trim();
@@ -170,7 +221,6 @@ const server = http.createServer(async (req, res) => {
             const parsed = JSON.parse(raw);
             const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
             if (text) {
-              // Emit in Anthropic SSE format so frontend works unchanged
               res.write('data: ' + JSON.stringify({
                 type: 'content_block_delta',
                 delta: { type: 'text_delta', text }
@@ -179,21 +229,24 @@ const server = http.createServer(async (req, res) => {
           } catch {}
         }
       });
-
       apiRes.on('end', () => {
         res.write('data: {"type":"message_stop"}\n\n');
         res.end();
       });
-      apiRes.on('error', () => res.end());
+      apiRes.on('error', e => {
+        console.error('[stream error]', e.message);
+        res.end();
+      });
       req.on('close', () => apiRes.destroy());
     } catch (e) {
+      console.error('[/claude/stream error]', e.message);
       res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: e.message }));
     }
     return;
   }
 
-  // ── Generate PPTX ──────────────────────────────────────────────────────
+  // ── /generate-pptx ──────────────────────────────────────────────────────
   if (req.method === 'POST' && req.url === '/generate-pptx') {
     try {
       const data = await readBody(req);
@@ -217,7 +270,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── Generate DOCX ──────────────────────────────────────────────────────
+  // ── /generate-docx ──────────────────────────────────────────────────────
   if (req.method === 'POST' && req.url === '/generate-docx') {
     try {
       const data = await readBody(req);
@@ -241,7 +294,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── Serve static frontend ──────────────────────────────────────────────
+  // ── Static frontend ──────────────────────────────────────────────────────
   if (IS_PROD) {
     let p = req.url.split('?')[0];
     if (p === '/') p = '/index.html';
@@ -254,7 +307,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 StartupAI → http://localhost:${PORT}`);
-  console.log(`   Gemini API key: ${API_KEY ? '✅ configured' : '❌ MISSING — set GEMINI_API_KEY'}`);
+  console.log(`   Gemini key: ${API_KEY ? '✅ set (' + API_KEY.slice(0,8) + '...)' : '❌ MISSING — add GEMINI_API_KEY in Render Environment'}`);
   console.log(`   Mode: ${IS_PROD ? 'Production ✅' : 'Development 🟡'}\n`);
 });
 
