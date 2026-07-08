@@ -86,8 +86,8 @@ function callGemini(body, stream) {
     });
 
     const endpoint = stream
-      ? `/v1beta/models/gemini-1.5-pro:streamGenerateContent?alt=sse&key=${API_KEY}`
-      : `/v1beta/models/gemini-1.5-pro:generateContent?key=${API_KEY}`;
+      ? `/v1beta/models/gemini-1.5-pro-latest:streamGenerateContent?alt=sse&key=${API_KEY}`
+      : `/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${API_KEY}`;
 
     const req = https.request({
       hostname: 'generativelanguage.googleapis.com',
@@ -116,7 +116,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok: true, prod: IS_PROD,
       hasKey: !!API_KEY,
-      model: 'gemini-1.5-pro'
+      model: 'gemini-1.5-pro-latest'
     }));
     return;
   }
