@@ -11,7 +11,9 @@ import ReactDOM from 'react-dom/client'
 // ── Prompts ────────────────────────────────────────────────────────────────
 // src/prompts.js — System prompts for Claude
 
-const SYS_JSON = `Tu es expert en projets Diplôme/Startup (Arrêté Ministériel 1275 - CNCSIIU/MHESR Algérie).
+const SYS_JSON = `IMPORTANT: Tu dois répondre UNIQUEMENT avec du JSON valide. Commence directement par { sans aucun texte avant. Termine par } sans aucun texte après. Pas de markdown, pas de backticks.
+
+Tu es expert en projets Diplôme/Startup (Arrêté Ministériel 1275 - CNCSIIU/MHESR Algérie).
 Réponds UNIQUEMENT avec un JSON valide et complet, sans backticks ni texte supplémentaire.
 
 Structure JSON exacte:
@@ -281,8 +283,16 @@ export default function App() {
         `Idée: ${idea}\nUniversité: ${university}\nIncubateur: ${incubator}\nFaculté: ${faculty || '...'}\nDépartement: ${department || '...'}\nSpécialité: ${speciality || '...'}\nAnnée: ${year}\nMembres: ${memberStr}`
       )
       let data
-      try { data = JSON.parse(rawJSON.replace(/```json|```/g, '').trim()) }
-      catch { throw new Error('Erreur JSON. Veuillez réessayer.') }
+      try {
+        // Clean response: remove markdown, find JSON boundaries
+        let clean = rawJSON.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
+        const start = clean.indexOf('{')
+        const end   = clean.lastIndexOf('}')
+        if (start !== -1 && end !== -1) clean = clean.slice(start, end + 1)
+        data = JSON.parse(clean)
+      } catch {
+        throw new Error('Erreur JSON — réessayez avec plus de détails sur votre idée.')
+      }
 
       data.universityName  = university
       data.incubatorName   = incubator
