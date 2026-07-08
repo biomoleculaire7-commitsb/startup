@@ -12,7 +12,7 @@ console.log('✅ Generators loaded');
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const PORT    = parseInt(process.env.PORT || '3737');
-const API_KEY = process.env.GEMINI_API_KEY || '';
+const API_KEY = process.env.GROQ_API_KEY || '';
 const DIST    = join(__dirname, '..', 'dist');
 const IS_PROD = existsSync(DIST);
 
@@ -63,44 +63,41 @@ function serveStatic(res, filePath) {
   }
 }
 
-// ── Gemini API call ──────────────────────────────────────────────────────────
-function callGemini(body, stream) {
+// ── Groq API call ────────────────────────────────────────────────────────────
+function callGroq(body, stream) {
   return new Promise((resolve, reject) => {
     if (!API_KEY) {
-      reject(new Error('GEMINI_API_KEY not set in environment variables'));
+      reject(new Error('GROQ_API_KEY not set in environment variables'));
       return;
     }
 
-    const systemText = body.system || '';
-    const userText   = (body.messages || []).map(m =>
-      typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-    ).join('\n');
-    const combined = systemText ? systemText + '\n\n' + userText : userText;
+    const messages = [];
+    if (body.system) {
+      messages.push({ role: 'system', content: body.system });
+    }
+    (body.messages || []).forEach(m => messages.push(m));
 
-    const geminiBody = JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: combined }] }],
-      generationConfig: {
-        maxOutputTokens: body.max_tokens || 4000,
-        temperature: 0.7,
-      },
+    const groqBody = JSON.stringify({
+      model:       'llama-3.3-70b-versatile',
+      messages,
+      max_tokens:  body.max_tokens || 4000,
+      temperature: 0.7,
+      stream:      !!stream,
     });
 
-    const endpoint = stream
-      ? `/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${API_KEY}`
-      : `/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
-
     const req = https.request({
-      hostname: 'generativelanguage.googleapis.com',
-      path:     endpoint,
+      hostname: 'api.groq.com',
+      path:     '/openai/v1/chat/completions',
       method:   'POST',
       headers: {
         'Content-Type':   'application/json',
-        'Content-Length': Buffer.byteLength(geminiBody),
+        'Authorization':  'Bearer ' + API_KEY,
+        'Content-Length': Buffer.byteLength(groqBody),
       },
     }, resolve);
 
     req.on('error', reject);
-    req.write(geminiBody);
+    req.write(groqBody);
     req.end();
   });
 }
@@ -116,7 +113,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok: true, prod: IS_PROD,
       hasKey: !!API_KEY,
-      model: 'gemini-2.0-flash'
+      model: 'llama-3.3-70b-versatile (Groq)'
     }));
     return;
   }
@@ -125,7 +122,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/claude') {
     try {
       const body   = await readBody(req);
-      const apiRes = await callGemini(body, false);
+      const apiRes = await callGroq(body, false);
 
       const chunks = [];
       apiRes.on('data', c => chunks.push(c));
@@ -153,21 +150,21 @@ const server = http.createServer(async (req, res) => {
           const json = JSON.parse(rawStr);
           if (json.error) {
             res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Gemini: ' + (json.error.message || JSON.stringify(json.error)) }));
+            res.end(JSON.stringify({ error: 'Groq: ' + (json.error.message || JSON.stringify(json.error)) }));
             return;
           }
-          const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          // OpenAI-compatible format (Groq uses this)
+          const text = json.choices?.[0]?.message?.content || '';
           if (!text) {
-            const reason = json.candidates?.[0]?.finishReason || JSON.stringify(json).slice(0, 200);
             res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Empty response from Gemini. Reason: ' + reason }));
+            res.end(JSON.stringify({ error: 'Empty response from Groq: ' + JSON.stringify(json).slice(0, 200) }));
             return;
           }
           res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ content: [{ type: 'text', text }] }));
         } catch (e) {
           res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Response parse error: ' + e.message + ' | raw: ' + rawStr.slice(0, 150) }));
+          res.end(JSON.stringify({ error: 'Parse error: ' + e.message + ' | raw: ' + rawStr.slice(0, 150) }));
         }
       });
     } catch (e) {
@@ -182,7 +179,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/claude/stream') {
     try {
       const body   = await readBody(req);
-      const apiRes = await callGemini(body, true);
+      const apiRes = await callGroq(body, true);
 
       // Check status first
       if (apiRes.statusCode !== 200) {
@@ -219,7 +216,8 @@ const server = http.createServer(async (req, res) => {
           if (!raw || raw === '[DONE]') continue;
           try {
             const parsed = JSON.parse(raw);
-            const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            // OpenAI-compatible streaming (Groq)
+            const text = parsed.choices?.[0]?.delta?.content || '';
             if (text) {
               res.write('data: ' + JSON.stringify({
                 type: 'content_block_delta',
@@ -307,7 +305,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 StartupAI → http://localhost:${PORT}`);
-  console.log(`   Gemini key: ${API_KEY ? '✅ set (' + API_KEY.slice(0,8) + '...)' : '❌ MISSING — add GEMINI_API_KEY in Render Environment'}`);
+  console.log(`   Groq key:   ${API_KEY ? '✅ set (' + API_KEY.slice(0,8) + '...)' : '❌ MISSING — add GROQ_API_KEY in Render Environment'}`);
   console.log(`   Mode: ${IS_PROD ? 'Production ✅' : 'Development 🟡'}\n`);
 });
 
