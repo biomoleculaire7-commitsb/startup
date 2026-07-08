@@ -102,6 +102,19 @@ function callGroq(body, stream) {
   });
 }
 
+// ── JSON cleaner ─────────────────────────────────────────────────────────────
+function cleanJSON(text) {
+  // Remove markdown code blocks
+  let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  // Find first { and last } to extract JSON object
+  const start = clean.indexOf('{');
+  const end   = clean.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    clean = clean.slice(start, end + 1);
+  }
+  return clean;
+}
+
 // ── Request handler ──────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
 
@@ -162,6 +175,7 @@ const server = http.createServer(async (req, res) => {
           }
           res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ content: [{ type: 'text', text }] }));
+          console.log('[Groq] OK, text length:', text.length);
         } catch (e) {
           res.writeHead(500, { ...CORS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Parse error: ' + e.message + ' | raw: ' + rawStr.slice(0, 150) }));
