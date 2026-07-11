@@ -1,3 +1,4 @@
+// generate_docx.js — دليل المشروع الرسمي 6 محاور — Word قابل للتعديل
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   Header, Footer, AlignmentType, HeadingLevel, LevelFormat,
@@ -590,11 +591,16 @@ async function generateDOCX(data, outputPath) {
           rows:[
             new TableRow({children:[cell("Poste de dépense",{bg:NAVY,bold:true,color:WHITE,fontSize:20,width:3500}),cell("Montant (DZD)",{bg:NAVY,bold:true,color:WHITE,fontSize:20,align:AlignmentType.CENTER,width:2763}),cell("Source de financement",{bg:NAVY,bold:true,color:WHITE,fontSize:20,width:2763})]}),
             ...["Immobilisations incorporelles (logiciels, brevets)","Immobilisations corporelles (matériel, équipements)","Frais de constitution","Loyer / Hébergement","Charges de personnel","Charges d'exploitation (marketing, communication)","Fonds de roulement","Autres charges"].map(p=>
-              new TableRow({children:[cell(p,{bg:LIGHT,color:NAVY,fontSize:19,width:3500}),cell("",{fontSize:19,width:2763}),cell("",{fontSize:19,width:2763})]})
+              new TableRow({children:[cell(p,{bg:LIGHT,color:NAVY,fontSize:19,width:3500}),cell("À compléter",{fontSize:19,color:"888888",width:2763}),cell("À préciser",{fontSize:19,color:"888888",width:2763})]})
             ),
-            new TableRow({children:[cell("TOTAL INVESTISSEMENT",{bg:GOLD,bold:true,color:DARK,fontSize:20,width:3500}),cell("",{bg:GOLD,bold:true,color:DARK,fontSize:20,width:2763}),cell("",{bg:GOLD,bold:true,color:DARK,fontSize:20,width:2763})]}),
+            new TableRow({children:[cell("TOTAL INVESTISSEMENT",{bg:GOLD,bold:true,color:DARK,fontSize:20,width:3500}),cell(data.slides?.slide14?.initialInvestment||"À compléter",{bg:GOLD,bold:true,color:DARK,fontSize:20,align:AlignmentType.CENTER,width:2763}),cell("Voir besoins ci-dessus",{bg:GOLD,bold:true,color:DARK,fontSize:20,width:2763})]}),
           ]
         }),
+        new Paragraph({ spacing:{before:80}, children:[] }),
+        ...((data.slides?.slide14?.needs||[]).length>0 ? [
+          para("Besoins identifiés :", {bold:true, color:NAVY, before:60, after:40}),
+          ...(data.slides?.slide14?.needs||[]).map(n=>bullet("  "+n))
+        ] : []),
 
         new Paragraph({ spacing:{before:120}, children:[] }),
         heading2("2. Le Chiffre d'Affaires"),
@@ -604,9 +610,16 @@ async function generateDOCX(data, outputPath) {
           width:{size:9026,type:WidthType.DXA}, columnWidths:[2500,1000,1000,1000,1000,1000,1526],
           rows:[
             new TableRow({children:[cell("DÉTAIL CHIFFRE D'AFFAIRES",{bg:NAVY,bold:true,color:WHITE,fontSize:18,width:2500}),cell("N-2",{bg:NAVY,bold:true,color:WHITE,fontSize:18,align:AlignmentType.CENTER,width:1000}),cell("N-1",{bg:NAVY,bold:true,color:WHITE,fontSize:18,align:AlignmentType.CENTER,width:1000}),cell("N",{bg:NAVY,bold:true,color:WHITE,fontSize:18,align:AlignmentType.CENTER,width:1000}),cell("N+1",{bg:GOLD,bold:true,color:DARK,fontSize:18,align:AlignmentType.CENTER,width:1000}),cell("N+2",{bg:GOLD,bold:true,color:DARK,fontSize:18,align:AlignmentType.CENTER,width:1000}),cell("N+3",{bg:GOLD,bold:true,color:DARK,fontSize:18,align:AlignmentType.CENTER,width:1526})]}),
-            ...["Produit / Service A","Quantité","Prix HT","Ventes totales","CHIFFRE D'AFFAIRES GLOBAL"].map((r,i)=>
-              new TableRow({children:[cell(r,{bg:i===4?LIGHT:WHITE,bold:i===4,color:i===4?NAVY:"444444",fontSize:18,width:2500}),...Array(6).fill(cell("—",{fontSize:18,align:AlignmentType.CENTER,width:i<5?1000:1526}))]})
-            ),
+            ...["Produit / Service A","Quantité","Prix HT","Ventes totales","CHIFFRE D'AFFAIRES GLOBAL"].map((r,i)=>{
+              const revs = data.slides?.slide14?.revenues||[];
+              const vals = i===4
+                ? ["—","—","—", revs[0]?String(revs[0]):"-", revs[1]?String(revs[1]):"-", revs[2]?String(revs[2]):"-"]
+                : ["—","—","—","—","—","—"];
+              return new TableRow({children:[
+                cell(r,{bg:i===4?LIGHT:WHITE,bold:i===4,color:i===4?NAVY:"444444",fontSize:18,width:2500}),
+                ...vals.map(v=>cell(v,{fontSize:18,align:AlignmentType.CENTER,width:1000,bold:i===4,color:i===4?NAVY:"444444"}))
+              ]});
+            }),
           ]
         }),
 
@@ -620,7 +633,16 @@ async function generateDOCX(data, outputPath) {
             new TableRow({children:[cell("COMPTE DE RÉSULTAT PRÉVISIONNEL",{bg:NAVY,bold:true,color:WHITE,fontSize:18,width:3000}),cell("N-2",{bg:NAVY,bold:true,color:WHITE,fontSize:16,align:AlignmentType.CENTER,width:1000}),cell("N-1",{bg:NAVY,bold:true,color:WHITE,fontSize:16,align:AlignmentType.CENTER,width:1000}),cell("N",{bg:NAVY,bold:true,color:WHITE,fontSize:16,align:AlignmentType.CENTER,width:1000}),cell("N+1",{bg:GOLD,bold:true,color:DARK,fontSize:16,align:AlignmentType.CENTER,width:1000}),cell("N+2",{bg:GOLD,bold:true,color:DARK,fontSize:16,align:AlignmentType.CENTER,width:1000}),cell("N+3",{bg:GOLD,bold:true,color:DARK,fontSize:16,align:AlignmentType.CENTER,width:1026})]}),
             ...["Vente et produits annexes","Production immobilisée","Subvention d'exploitation","PRODUCTION DE L'EXERCICE","Achats consommés","Services extérieurs","CONSOMMATION DE L'EXERCICE","VALEUR AJOUTÉE D'EXPLOITATION","Charges de personnel","Impôts et taxes","EXCÉDENT BRUT D'EXPLOITATION","Résultat opérationnel","Résultat financier","RÉSULTAT ORDINAIRE AVANT IMPÔT","RÉSULTAT NET DE L'EXERCICE"].map((r,i)=>{
               const isBold=r===r.toUpperCase();
-              return new TableRow({children:[cell(r,{bg:isBold?LIGHT:WHITE,bold:isBold,color:isBold?NAVY:"444444",fontSize:i===14?18:17,width:3000}),...Array(6).fill(cell("",{fontSize:17,width:i===0?1000:1000}))]});
+              const revs = data.slides?.slide14?.revenues||[];
+              // Fill PRODUCTION and NET rows with revenue projections
+              let rowVals = ["","","","","",""];
+              if(r==="PRODUCTION DE L'EXERCICE"||r==="Vente et produits annexes"){
+                rowVals = ["—","—","—", revs[0]?String(revs[0]):"", revs[1]?String(revs[1]):"", revs[2]?String(revs[2]):""];
+              }
+              return new TableRow({children:[
+                cell(r,{bg:isBold?LIGHT:WHITE,bold:isBold,color:isBold?NAVY:"444444",fontSize:i===14?18:17,width:3000}),
+                ...rowVals.map(v=>cell(v,{fontSize:17,align:AlignmentType.CENTER,width:1000,color:"333333"}))
+              ]});
             }),
           ]
         }),
@@ -636,10 +658,44 @@ async function generateDOCX(data, outputPath) {
             new TableRow({children:[cell("RUBRIQUES",{bg:NAVY,bold:true,color:WHITE,fontSize:16,width:2100}),..."Jan,Fév,Mar,Avr,Mai,Jun,Jui,Aoû,Sep,Oct,Nov,Déc".split(",").map(m=>cell(m,{bg:NAVY,bold:true,color:WHITE,fontSize:13,align:AlignmentType.CENTER,width:576})),cell("Total",{bg:GOLD,bold:true,color:DARK,fontSize:15,align:AlignmentType.CENTER,width:250})]}),
             ...["Recettes d'exploitation","Autres recettes","TOTAL RECETTES","Achats matières","Charges de personnel","Charges diverses","Remboursements","TOTAL DÉPENSES","SOLDE MENSUEL","TRÉSORERIE CUMULATIVE"].map((r,i)=>{
               const isBold=r.startsWith("TOTAL")||r.startsWith("SOLDE")||r.startsWith("TRÉSORERIE");
-              return new TableRow({children:[cell(r,{bg:isBold?LIGHT:WHITE,bold:isBold,color:isBold?NAVY:"444444",fontSize:15,width:2100}),...Array(13).fill(cell("",{fontSize:14,align:AlignmentType.CENTER,width:576}))]});
+              const revs = data.slides?.slide14?.revenues||[];
+              const monthly = revs[0] ? Math.round(revs[0]/12) : 0;
+              const monthlyStr = monthly ? String(monthly) : "";
+              // For TOTAL RECETTES row, fill with monthly estimate
+              const vals = Array(13).fill("");
+              if(r==="TOTAL RECETTES"||r==="Recettes d'exploitation"){
+                for(let m=0;m<12;m++) vals[m]=monthlyStr;
+                vals[12]=revs[0]?String(revs[0]):"";
+              }
+              if(r==="TRÉSORERIE CUMULATIVE"){
+                vals[12]=revs[0]?String(revs[0]):"";
+              }
+              return new TableRow({children:[
+                cell(r,{bg:isBold?LIGHT:WHITE,bold:isBold,color:isBold?NAVY:"444444",fontSize:15,width:2100}),
+                ...vals.map(v=>cell(v,{fontSize:13,align:AlignmentType.CENTER,width:576,color:"333333"}))
+              ]});
             }),
           ]
         }),
+
+        new Paragraph({ spacing:{before:80}, children:[] }),
+        ...(data.slides?.slide14 ? [
+          new Table({
+            width:{size:9026,type:WidthType.DXA}, columnWidths:[3008,3009,3009],
+            rows:[
+              new TableRow({children:[
+                cell("💰 Investissement initial",{bg:NAVY,bold:true,color:WHITE,fontSize:20,align:AlignmentType.CENTER,width:3008}),
+                cell("📈 CA Prévu An 1",{bg:NAVY,bold:true,color:WHITE,fontSize:20,align:AlignmentType.CENTER,width:3009}),
+                cell("⏱ Seuil de rentabilité",{bg:NAVY,bold:true,color:WHITE,fontSize:20,align:AlignmentType.CENTER,width:3009}),
+              ]}),
+              new TableRow({children:[
+                cell(data.slides.slide14.initialInvestment||"À compléter",{bg:GOLD,bold:true,color:DARK,fontSize:22,align:AlignmentType.CENTER,width:3008}),
+                cell(data.slides.slide14.ca1||"À compléter",{bg:GOLD,bold:true,color:DARK,fontSize:22,align:AlignmentType.CENTER,width:3009}),
+                cell(data.slides.slide14.breakEven||"À compléter",{bg:GOLD,bold:true,color:DARK,fontSize:22,align:AlignmentType.CENTER,width:3009}),
+              ]}),
+            ]
+          }),
+        ] : []),
 
         new Paragraph({ children: [new PageBreak()] }),
 
